@@ -2,12 +2,26 @@
 import asyncio, time
 from pathlib import Path
 
+import pytest
+
 from jrock.config import Settings
 from jrock.agent.context import AgentContext
 from jrock.agent.memory import Memory
 from jrock.agent.sessions import SessionStore
 from jrock.agent.soul import SoulStore
 from jrock.agent.skills import SkillStore
+
+
+@pytest.fixture(autouse=True)
+def _isolate_config(tmp_path, monkeypatch):
+    """Never let a test touch the real data/config.json.
+
+    The command handlers call Settings.save(), so without this a test run
+    silently overwrites the live settings (provider, model, allowed ids...).
+    """
+    import jrock.config as cfg
+    monkeypatch.setattr(cfg, "CONFIG_FILE", tmp_path / "config.json")
+    yield
 
 
 class StubLLM:

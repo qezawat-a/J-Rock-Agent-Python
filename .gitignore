@@ -10,3 +10,4 @@ data/sessions/index.json
 data/memory/*.db
 data/memory/dreams/
 data/workspace/
+data/logs/
