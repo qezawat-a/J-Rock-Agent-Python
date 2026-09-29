@@ -52,6 +52,7 @@ class Settings:
     terminal_allowed: bool = True
     allow_outside_workspace: bool = False   # let fs tools escape the workspace
     allow_dangerous_commands: bool = False  # let terminal run rm -rf / etc.
+    allow_private_fetch: bool = False       # let web_fetch reach private hosts
     max_agent_steps: int = 30
     workspace: str = ""   # where terminal/fs tools operate (default: project root)
     # generator

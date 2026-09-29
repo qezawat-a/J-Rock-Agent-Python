@@ -73,9 +73,11 @@ async def search(args: dict, ctx: AgentContext) -> str:
 
 async def fetch(args: dict, ctx: AgentContext) -> str:
     url = args.get("url", "")
-    why = _blocked(url)
-    if why:
-        return f"Refused to fetch {url}: {why}."
+    if not ctx.settings.allow_private_fetch:
+        why = _blocked(url)
+        if why:
+            return (f"Refused to fetch {url}: {why}. The owner can allow this "
+                    "with /config set allow_private_fetch true")
     try:
         async with httpx.AsyncClient(timeout=30, headers=UA, follow_redirects=True) as c:
             r = await c.get(url)

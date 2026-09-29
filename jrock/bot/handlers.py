@@ -236,9 +236,22 @@ async def cmd_set(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
                                 + ", ".join(PROVIDERS))
             return
         s.provider = name
-        s.model = PROVIDERS[name]["models"][0]
+        known = PROVIDERS[name]["models"]
+        if known:
+            s.model = known[0]
+        else:
+            # Providers such as 'custom' ship no static list, so ask the
+            # endpoint. Falling back to the previous model beats crashing.
+            try:
+                discovered = await core.llm.list_models(name)
+            except Exception:
+                discovered = []
+            s.model = discovered[0] if discovered else s.model
         s.save()
-        await reply(update, f"provider = {name}, model = {s.model}")
+        await reply(update, f"provider = {name}, model = {s.model}"
+                            + ("" if known or s.model else
+                               "\nThis provider ships no model list - pick one "
+                               "with /models then /set model <name>."))
         return
     if key == "thinking":
         return await cmd_thinking(update, context)
@@ -690,6 +703,9 @@ async def cmd_config(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         elif key == "allow_dangerous_commands":
             flag = _on(value)
             s.allow_dangerous_commands = True if flag is None else flag
+        elif key == "allow_private_fetch":
+            flag = _on(value)
+            s.allow_private_fetch = True if flag is None else flag
         elif key == "workspace":
             s.workspace = value
         elif key == "soul":
@@ -697,7 +713,8 @@ async def cmd_config(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         else:
             await reply(update, f"Unknown key. Try max_agent_steps, "
                                 "terminal_allowed, allow_outside_workspace, "
-                                "allow_dangerous_commands, workspace, soul.")
+                                "allow_dangerous_commands, allow_private_fetch, "
+                                "workspace, soul.")
             return
         s.save()
         await reply(update, f"{key} = {getattr(s, key)}")
@@ -711,6 +728,7 @@ async def cmd_config(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         f"terminal_allowed: {s.terminal_allowed}\n"
         f"allow_outside_workspace: {s.allow_outside_workspace}\n"
         f"allow_dangerous_commands: {s.allow_dangerous_commands}\n"
+        f"allow_private_fetch: {s.allow_private_fetch}\n"
         f"max_agent_steps: {s.max_agent_steps}\n"
         f"workspace: {workspace_of(s)}\n"
         f"soul: {s.default_soul}\n"

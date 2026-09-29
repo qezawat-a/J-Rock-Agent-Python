@@ -20,6 +20,8 @@ def status(ctx: AgentContext) -> str:
         f"{'allowed' if s.allow_outside_workspace else 'blocked'}   "
         f"dangerous commands: "
         f"{'allowed' if s.allow_dangerous_commands else 'blocked'}",
+        f"private-network fetch: "
+        f"{'allowed' if s.allow_private_fetch else 'blocked'}",
         f"max steps per task: {s.max_agent_steps}",
         "",
         f"<b>Tools ({len(REGISTRY)})</b>: " + ", ".join(REGISTRY),

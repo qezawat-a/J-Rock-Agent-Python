@@ -274,4 +274,73 @@ def test_web_fetch_blocks_internal_targets(url):
 
 
 def test_web_fetch_allows_public_hosts():
-    assert W._blocked("https://example.com/page") is None
+    """Hermetic: this sandbox's egress proxy resolves every name to 198.18.x.x,
+    so the real resolver cannot be used to prove a public host is allowed."""
+    import socket
+    real = socket.getaddrinfo
+    socket.getaddrinfo = lambda *a, **k: [(2, 1, 6, "", ("93.184.216.34", 443))]
+    try:
+        assert W._blocked("https://example.com/page") is None
+    finally:
+        socket.getaddrinfo = real
+
+
+def test_web_fetch_guard_can_be_opted_out(tmp_path, monkeypatch):
+    """Behind a proxy that resolves everything to a private range, the owner
+    needs a way to let ordinary fetches through."""
+    ctx = _ctx(tmp_path, allow_private_fetch=True)
+    called = {}
+
+    class _C:
+        def __init__(self, **k): pass
+        async def __aenter__(self): return self
+        async def __aexit__(self, *a): return False
+        async def get(self, url):
+            called["url"] = url
+            return type("R", (), {"headers": {"content-type": "text/plain"},
+                                  "text": "hello from the proxy"})()
+
+    monkeypatch.setattr(W.httpx, "AsyncClient", _C)
+    out = asyncio.run(W.fetch({"url": "http://example.com/x"}, ctx))
+    assert "hello from the proxy" in out and called["url"].endswith("/x")
+
+
+# ----------------------------------------------------------- provider switch
+def test_switching_provider_never_crashes(monkeypatch):
+    """`/provider custom` has an empty static model list and used to raise
+    IndexError, killing the handler with no reply."""
+    import types
+    from jrock.bot import handlers as H
+    from jrock.llm.providers import PROVIDERS
+
+    async def no_models(provider=None):
+        return []
+
+    for name in PROVIDERS:
+        settings = Settings()
+        settings.provider, settings.model = "openai", "gpt-4o"
+        settings.tg_allowed_ids = []
+        settings.save = lambda: None
+        core = types.SimpleNamespace(
+            settings=settings,
+            llm=types.SimpleNamespace(list_models=no_models),
+            bot=object())
+
+        sent = []
+
+        async def fake_reply(update, text, _sent=sent):
+            _sent.append(text)
+
+        monkeypatch.setattr(H, "core_of", lambda c: core)
+        monkeypatch.setattr(H, "reply", fake_reply)
+        update = types.SimpleNamespace(
+            effective_user=types.SimpleNamespace(id=1),
+            effective_chat=types.SimpleNamespace(id=1))
+        ctx = types.SimpleNamespace(args=["provider", name], application=None)
+
+        asyncio.run(H.cmd_set(update, ctx))       # must not raise
+
+        assert sent, f"{name}: no reply sent"
+        assert f"provider = {name}" in sent[-1], name
+        assert settings.provider == name
+        assert settings.model, f"{name} left the model unset"
