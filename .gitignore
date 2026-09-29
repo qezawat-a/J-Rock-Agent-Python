@@ -1,0 +1,12 @@
+.env
+__pycache__/
+*.pyc
+.venv/
+venv/
+# runtime data: sessions, memory db, dreams, generated files
+data/config.json
+data/sessions/*.jsonl
+data/sessions/index.json
+data/memory/*.db
+data/memory/dreams/
+data/workspace/
