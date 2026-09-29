@@ -12,12 +12,13 @@ TIMEOUT = 300.0
 
 class Approvals:
     def __init__(self) -> None:
-        self._pending: dict[str, asyncio.Future] = {}
+        self._pending: dict[str, tuple[asyncio.Future, int | None]] = {}
 
-    async def request(self, bot: Bot, chat_id: int, what: str) -> bool:
+    async def request(self, bot: Bot, chat_id: int, what: str,
+                      user_id: int | None = None) -> bool:
         token = uuid.uuid4().hex[:12]
         fut: asyncio.Future = asyncio.get_running_loop().create_future()
-        self._pending[token] = fut
+        self._pending[token] = (fut, user_id)
         kb = InlineKeyboardMarkup([[
             InlineKeyboardButton("✅ Approve", callback_data=f"appr:{token}"),
             InlineKeyboardButton("❌ Deny", callback_data=f"deny:{token}"),
@@ -37,9 +38,19 @@ class Approvals:
         async def on_callback(update, context):
             query = update.callback_query
             action, _, token = query.data.partition(":")
-            fut = self._pending.get(token)
+            entry = self._pending.get(token)
+            if entry is None:
+                await query.answer("This request expired.", show_alert=True)
+                return
+            fut, requester = entry
             if fut is None or fut.done():
                 await query.answer("This request expired.", show_alert=True)
+                return
+            # Only the person who triggered the action may resolve it, so one
+            # allowed user cannot approve another user's destructive command.
+            if requester is not None and query.from_user.id != requester:
+                await query.answer("Only the requester can approve this.",
+                                   show_alert=True)
                 return
             fut.set_result(action == "appr")
             await query.answer("Approved." if action == "appr" else "Denied.")

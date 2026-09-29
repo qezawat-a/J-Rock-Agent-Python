@@ -45,10 +45,11 @@ async def _skill_read(args: dict, ctx: AgentContext) -> str:
 
 
 async def _memory_store(args: dict, ctx: AgentContext) -> str:
-    if not ctx.s.learning:
+    if not ctx.settings.learning:
         return "Learning is off; memory not stored."
-    if ctx.memory:
-        ctx.memory.store(ctx.user_id, args.get("fact", ""))
+    if not ctx.memory:
+        return "No memory store."
+    ctx.memory.store(ctx.user_id, args.get("fact", ""))
     return "Stored."
 
 
@@ -110,5 +111,4 @@ def build_registry() -> dict[str, Tool]:
 
 
 TOOL_SPECS = [t.name for t in build_registry().values()]
-
 

@@ -50,6 +50,8 @@ class Settings:
     learning: bool = True
     default_soul: str = "fable-5.1"
     terminal_allowed: bool = True
+    allow_outside_workspace: bool = False   # let fs tools escape the workspace
+    allow_dangerous_commands: bool = False  # let terminal run rm -rf / etc.
     max_agent_steps: int = 30
     workspace: str = ""   # where terminal/fs tools operate (default: project root)
     # generator
@@ -58,6 +60,11 @@ class Settings:
 
     def save(self) -> None:
         CONFIG_FILE.write_text(json.dumps(asdict(self), indent=2))
+        # The file holds API keys in plaintext; keep it owner-only.
+        try:
+            CONFIG_FILE.chmod(0o600)
+        except OSError:  # pragma: no cover - platform dependent
+            pass
 
     @classmethod
     def load(cls) -> "Settings":

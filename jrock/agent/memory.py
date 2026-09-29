@@ -34,6 +34,16 @@ class Memory:
                 hits INTEGER DEFAULT 0, created REAL)""")
             con.execute("""CREATE TABLE IF NOT EXISTS profile(
                 user_id INTEGER PRIMARY KEY, data TEXT)""")
+            con.execute("CREATE INDEX IF NOT EXISTS idx_facts_user "
+                        "ON facts(user_id)")
+            # A lesson the user repeats is the same lesson: keep one row.
+            # Collapse any duplicates an older database already accumulated
+            # before the unique index is applied.
+            con.execute(
+                "DELETE FROM lessons WHERE id NOT IN ("
+                "SELECT MIN(id) FROM lessons GROUP BY user_id, lesson)")
+            con.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_lessons_unique "
+                        "ON lessons(user_id, lesson)")
 
     # ------------------------------------------------------------- facts
     def store(self, user_id: int, fact: str, source: str = "chat") -> None:
@@ -41,6 +51,10 @@ class Memory:
         if len(fact) < 4:
             return
         with self._conn() as con:
+            dup = con.execute("SELECT 1 FROM facts WHERE user_id=? AND fact=?",
+                              (user_id, fact)).fetchone()
+            if dup:
+                return
             con.execute("INSERT INTO facts(user_id,fact,created,source) VALUES(?,?,?,?)",
                         (user_id, fact, time.time(), source))
 
@@ -57,7 +71,12 @@ class Memory:
                 score = r["score"] - 0.01 * age_days
             scored.append((score, r["fact"]))
         scored.sort(reverse=True)
-        return [f for _, f in scored[:k]]
+        top = [f for _, f in scored[:k]]
+        # Reinforce what actually got used, so useful facts survive /dream's
+        # decay instead of every score drifting to zero.
+        for fact in top:
+            self.bump(user_id, fact)
+        return top
 
     def _all(self, user_id: int) -> list[sqlite3.Row]:
         with self._conn() as con:
@@ -70,14 +89,22 @@ class Memory:
 
     def bump(self, user_id: int, fact: str) -> None:
         with self._conn() as con:
-            con.execute("UPDATE facts SET score=score+0.5 WHERE user_id=? AND fact=?",
-                        (user_id, fact))
+            con.execute("UPDATE facts SET score=MIN(score+0.5, 5.0) "
+                        "WHERE user_id=? AND fact=?", (user_id, fact))
 
     # ------------------------------------------------------------ lessons
     def add_lesson(self, user_id: int, lesson: str) -> None:
+        lesson = lesson.strip()
+        if not lesson:
+            return
         with self._conn() as con:
-            con.execute("INSERT INTO lessons(user_id,lesson,created) VALUES(?,?,?)",
-                        (user_id, lesson.strip(), time.time()))
+            con.execute("INSERT OR IGNORE INTO lessons(user_id,lesson,created) "
+                        "VALUES(?,?,?)", (user_id, lesson, time.time()))
+            # Keep the table bounded regardless of how chatty the learning loop is.
+            con.execute(
+                "DELETE FROM lessons WHERE user_id=? AND id NOT IN ("
+                "SELECT id FROM lessons WHERE user_id=? ORDER BY created DESC LIMIT 200)",
+                (user_id, user_id))
 
     def lessons(self, user_id: int, k: int = 10) -> list[str]:
         with self._conn() as con:
@@ -127,9 +154,13 @@ class Memory:
             self.set_profile(user_id, prof)
         # mark processed facts by lowering their score so they rank lower
         with self._conn() as con:
-            con.execute("UPDATE facts SET score=score*0.5 WHERE user_id=?", (user_id,))
+            # Decay, but never below a floor, so a fact can be re-promoted by
+            # recall instead of decaying permanently toward zero.
+            con.execute("UPDATE facts SET score=MAX(score*0.5, 0.2) WHERE user_id=?",
+                        (user_id,))
         stamp = time.strftime("%Y-%m-%d")
         out = DREAMS / f"{user_id}-{stamp}.md"
+        out.parent.mkdir(parents=True, exist_ok=True)
         out.write_text(f"# Dream {stamp}\n\n" +
                        "\n".join(f"- {i}" for i in data.get("insights", [])) +
                        "\n\n## Lessons\n" +

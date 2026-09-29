@@ -54,7 +54,11 @@ class SessionStore:
                 msgs.append(json.loads(line))
             except Exception:
                 continue
-        return [{"role": m["role"], "content": m["content"]} for m in msgs[-turns:]]
+        # The transcript also records tool traffic for the /sessions view, but
+        # only user/assistant turns are replayable into a model request.
+        replayable = [m for m in msgs if m.get("role") in ("user", "assistant")]
+        return [{"role": m["role"], "content": m["content"]}
+                for m in replayable[-turns:]]
 
     def last_id(self, user_id: int) -> str | None:
         items = self.list(user_id)

@@ -4,6 +4,7 @@ import asyncio, datetime, json, types
 
 import pytest
 from telegram import Chat, Message, Update, User
+from telegram.ext import Application
 
 from jrock.bot import handlers
 from jrock.bot.confirm import Approvals
@@ -170,3 +171,44 @@ def test_code_review_uses_the_review_directive():
     sys0 = llm.seen[0]["messages"][0]["content"]
     assert 'name="code-review"' in sys0 and "jrock/agent" in sys0
     assert "CRITICAL" in sys0 and "file:line" in sys0
+
+
+# --------------------------------------------------------------- wiring
+def test_register_wires_every_handler():
+    """Regression: Telegram rejects '-' in command names, so building the
+    handler list used to raise ValueError and the bot could not start."""
+    from jrock.bot import handlers as H
+    bot = FakeBot(); bot.sent = []
+    core = make_core(StubLLM([]), bot)
+    app = Application.builder().token("123456:TEST").build()
+    app.bot_data["core"] = core
+    H.register(app, core)          # must not raise
+    names = [h.__class__.__name__ for h in app.handlers[0]]
+    assert "CallbackQueryHandler" in names, "approval buttons must be wired"
+    assert names.count("MessageHandler") == 3
+
+
+def test_hyphenated_aliases_are_still_accepted():
+    """`/code-review` etc. cannot be real commands, but must still work."""
+    from telegram.ext import filters
+    from jrock.bot import handlers as H
+    bot = FakeBot(); bot.sent = []
+    core = make_core(StubLLM([]), bot)
+    app = Application.builder().token("123456:TEST").build()
+    app.bot_data["core"] = core
+    H.register(app, core)
+    alias = [h for h in app.handlers[0]
+             if h.__class__.__name__ == "MessageHandler" and h.filters is not filters.TEXT][0]
+    for text in ("/code-review jrock", "/auto-compat on",
+                 "/resume-session last", "/set-api-key openai sk-x"):
+        m = Message(message_id=1, date=datetime.datetime.now(datetime.timezone.utc),
+                    chat=Chat(id=UID, type="private"),
+                    from_user=User(id=UID, first_name="T", is_bot=False), text=text)
+        m.set_bot(bot)
+        assert alias.check_update(Update(update_id=1, message=m)), text
+    # a normal command must not be swallowed by the alias filter
+    m = Message(message_id=1, date=datetime.datetime.now(datetime.timezone.utc),
+                chat=Chat(id=UID, type="private"),
+                from_user=User(id=UID, first_name="T", is_bot=False), text="/harness")
+    m.set_bot(bot)
+    assert not alias.check_update(Update(update_id=1, message=m))

@@ -31,7 +31,7 @@ HELP = """<b>J-Rock</b> - your AI agent. Just send me a message and I will work.
 /thinking off|low|medium|high
 /models - list models / /set model &lt;name&gt;
 /provider [name] - show or switch provider
-/set-api-key &lt;provider&gt; &lt;key&gt; (owner)
+/set_api_key &lt;provider&gt; &lt;key&gt; (owner)
 
 <b>Persona &amp; skills</b>
 /soul - show active soul / /soul add &lt;name&gt; &lt;file|text&gt;
@@ -44,20 +44,20 @@ HELP = """<b>J-Rock</b> - your AI agent. Just send me a message and I will work.
 /agents plan &lt;task&gt; - research and plan
 /team - sub-agents
 /bugfixes &lt;description&gt;
-/code-review [path]
+/code_review [path]
 /deepsearch &lt;query&gt;
 /generator image|tts|video|files|codes|docs &lt;prompt&gt;
 /app_connector &lt;name&gt; &lt;url&gt; [key]
 
 <b>Safety</b>
 /auto_approve_on_edit on|off - skip approval prompts
-/auto-compat on|off - compatibility layer
+/auto_compat on|off - compatibility layer
 /compat - compatibility report
 /tools - list tools
 /mcp - MCP servers / /mcp add &lt;name&gt; &lt;command|json&gt;
 
-/b>Sessions &amp; settings</b>
-/sessions - list / /resume-session &lt;id|last&gt;
+<b>Sessions &amp; settings</b>
+/sessions - list / /resume_session &lt;id|last&gt;
 /config - settings / /quit - stop the current task
 """
 
@@ -98,7 +98,7 @@ def make_ctx(core, user_id: int, chat_id: int) -> AgentContext:
         user_id=user_id,
         chat_id=chat_id,
         notify=lambda text: media.send_long(bot, chat_id, text),
-        confirm=lambda what: core.approvals.request(bot, chat_id, what),
+        confirm=lambda what: core.approvals.request(bot, chat_id, what, user_id),
         deliver=lambda payload: media.deliver(bot, chat_id, payload),
         chat=bot,
         workspace=workspace_of(core.settings),
@@ -684,13 +684,20 @@ async def cmd_config(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         elif key == "terminal_allowed":
             flag = _on(value)
             s.terminal_allowed = True if flag is None else flag
+        elif key == "allow_outside_workspace":
+            flag = _on(value)
+            s.allow_outside_workspace = True if flag is None else flag
+        elif key == "allow_dangerous_commands":
+            flag = _on(value)
+            s.allow_dangerous_commands = True if flag is None else flag
         elif key == "workspace":
             s.workspace = value
         elif key == "soul":
             s.default_soul = value
         else:
             await reply(update, f"Unknown key. Try max_agent_steps, "
-                                "terminal_allowed, workspace, soul.")
+                                "terminal_allowed, allow_outside_workspace, "
+                                "allow_dangerous_commands, workspace, soul.")
             return
         s.save()
         await reply(update, f"{key} = {getattr(s, key)}")
@@ -702,6 +709,8 @@ async def cmd_config(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         f"auto_compat: {s.auto_compat}\nlearning: {s.learning}\n"
         f"auto_approve_on_edit: {s.auto_approve_on_edit}\n"
         f"terminal_allowed: {s.terminal_allowed}\n"
+        f"allow_outside_workspace: {s.allow_outside_workspace}\n"
+        f"allow_dangerous_commands: {s.allow_dangerous_commands}\n"
         f"max_agent_steps: {s.max_agent_steps}\n"
         f"workspace: {workspace_of(s)}\n"
         f"soul: {s.default_soul}\n"
@@ -808,6 +817,23 @@ async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
 
 
 def register(app: Application, core) -> None:
+    ALIASES = {
+        "code-review": cmd_code_review,
+        "auto-compat": cmd_autocompat,
+        "resume-session": cmd_resume,
+        "set-api-key": cmd_set_api_key,
+    }
+
+    async def cmd_alias(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Dispatch a hyphenated alias to its command handler."""
+        parts = (update.effective_message.text or "").strip().split()
+        name = parts[0].lstrip("/").split("@", 1)[0]
+        handler = ALIASES.get(name)
+        if handler is None:
+            return
+        context.args = parts[1:]
+        await handler(update, context)
+
     handlers = [
         CommandHandler("start", cmd_start),
         CommandHandler(["help", "menu"], cmd_start),
@@ -823,13 +849,14 @@ def register(app: Application, core) -> None:
         CommandHandler("dream", cmd_dream),
         CommandHandler("deepsearch", cmd_deepsearch),
         CommandHandler("bugfixes", cmd_bugfixes),
-        CommandHandler("code-review", cmd_code_review),
+        # Telegram command names allow only letters, digits and underscores.
+        CommandHandler("code_review", cmd_code_review),
         CommandHandler("quit", cmd_quit),
-        CommandHandler("auto-compat", cmd_autocompat),
+        CommandHandler("auto_compat", cmd_autocompat),
         CommandHandler("compat", cmd_compat),
         CommandHandler("sessions", cmd_sessions),
-        CommandHandler("resume-session", cmd_resume),
-        CommandHandler("set-api-key", cmd_set_api_key),
+        CommandHandler("resume_session", cmd_resume),
+        CommandHandler("set_api_key", cmd_set_api_key),
         CommandHandler("team", cmd_team),
         CommandHandler("agents", cmd_agents),
         CommandHandler("tools", cmd_tools),
@@ -841,6 +868,12 @@ def register(app: Application, core) -> None:
     ]
     for h in handlers:
         app.add_handler(h)
+    # Keep the friendlier hyphenated spellings working: Telegram itself
+    # rejects '-' in a command name, so these arrive as plain text.
+    app.add_handler(MessageHandler(
+        filters.Regex(r"^/(code-review|auto-compat|resume-session|set-api-key)"
+                      r"(@\w+)?(\s|$)"),
+        cmd_alias))
     app.add_handler(core.approvals.handler())
     app.add_handler(MessageHandler(
         filters.TEXT & ~filters.COMMAND, on_message))

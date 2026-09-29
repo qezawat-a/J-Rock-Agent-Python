@@ -117,11 +117,10 @@ class Agent:
     # --------------------------------------------------------------- loop
     async def run(self, task: str, history: list[dict] | None = None) -> str:
         self.task = task
-        self.messages = list(history or [])[-20:]
+        self.messages = self._clean_history(history)
         self.messages.append({"role": "system", "content": self.system_prompt()})
         self.messages.append({"role": "user", "content": task})
         self._log("user", task)
-
         tool_specs = [t.spec() for t in self.tools.values()]
         if self.ctx.mcp:
             tool_specs += self.ctx.mcp.tool_specs()
@@ -164,6 +163,29 @@ class Agent:
                     (msg.get("content") or "(none)")
         self._maybe_learn(task)
         return final
+
+    @staticmethod
+    def _clean_history(history: list[dict] | None) -> list[dict]:
+        """Keep only replayable turns.
+
+        Resumed transcripts can contain ``tool`` rows whose parent assistant
+        message was trimmed away; providers reject a tool result with no
+        matching call, so they are dropped here along with empty turns. The
+        window then starts on a user message for the same reason.
+        """
+        out: list[dict] = []
+        for m in history or []:
+            role = m.get("role")
+            if role not in ("user", "assistant"):
+                continue
+            content = str(m.get("content") or "").strip()
+            if not content:
+                continue
+            out.append({"role": role, "content": content})
+        out = out[-20:]
+        while out and out[0]["role"] != "user":
+            out.pop(0)
+        return out
 
     async def _dispatch(self, name: str, args: dict) -> str:
         if name.startswith("mcp__"):

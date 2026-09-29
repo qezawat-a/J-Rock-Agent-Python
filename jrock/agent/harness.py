@@ -16,6 +16,10 @@ def status(ctx: AgentContext) -> str:
         f"{'on' if s.learning else 'off'}",
         f"terminal access: {'enabled' if s.terminal_allowed else 'disabled'}   "
         f"auto_approve_on_edit: {'on' if s.auto_approve_on_edit else 'off'}",
+        f"outside workspace: "
+        f"{'allowed' if s.allow_outside_workspace else 'blocked'}   "
+        f"dangerous commands: "
+        f"{'allowed' if s.allow_dangerous_commands else 'blocked'}",
         f"max steps per task: {s.max_agent_steps}",
         "",
         f"<b>Tools ({len(REGISTRY)})</b>: " + ", ".join(REGISTRY),

@@ -40,5 +40,7 @@ class AgentContext:
         if self.settings.auto_approve_on_edit:
             return True
         if self.confirm is None:
-            return True
+            # Fail closed: a destructive action with no approval wiring is denied
+            # rather than run unattended.
+            return False
         return await self.confirm(what)

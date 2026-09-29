@@ -27,14 +27,35 @@ def split(text: str, size: int = CHUNK) -> list[str]:
             if cur:
                 out.append(cur)
             while len(para) > size:
-                out.append(para[:size])
-                para = para[size:]
+                cut = _cut(para, size)
+                out.append(para[:cut])
+                para = para[cut:]
             cur = para
         else:
             cur = block
     if cur:
         out.append(cur)
     return out
+
+
+def _cut(text: str, pos: int) -> int:
+    """Move a hard cut so it never lands inside an HTML tag or entity.
+
+    A split mid-`<b>` or mid-`&amp;` makes Telegram reject the chunk, which
+    drops the whole message back to unformatted plain text.
+    """
+    if pos >= len(text) or pos <= 0:
+        return max(1, min(pos, len(text)))
+    if text.rfind("<", 0, pos) > text.rfind(">", 0, pos):
+        tag_start = text.rfind("<", 0, pos)
+        if tag_start > 0:
+            return tag_start
+    amp, semi = text.rfind("&", 0, pos), text.rfind(";", 0, pos)
+    if amp > semi and 0 < pos - amp <= 10:
+        span = text[amp:pos]
+        if " " not in span and "\n" not in span and amp > 0:
+            return amp
+    return pos
 
 
 def esc(text: str) -> str:
